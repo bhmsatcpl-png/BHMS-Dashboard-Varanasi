@@ -3,9 +3,9 @@ name: Process Bridge Sensor Data
 on:
   push:
     paths:
-      - 'data/*.xlsx'        # Triggers when ANY .xlsx file in data/ changes/is added
-      - '**/*.xlsx'         # Or triggers on any Excel file anywhere in the repo
-  workflow_dispatch:        # Allows manual run from GitHub UI
+      - 'data/*.xlsx'
+      - '**/*.xlsx'
+  workflow_dispatch:
 
 jobs:
   process-sensor-data:
@@ -13,13 +13,14 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        # Pinning actions/checkout@v4 to commit SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        # Pinning actions/setup-python@v5 to commit SHA
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.10'
-          cache: 'pip'
 
       - name: Install dependencies
         run: |
