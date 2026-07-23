@@ -31,37 +31,48 @@ jobs:
           excel_files = glob.glob('data/*.xlsx')
           processed_dfs = []
 
+          print(f'Found {len(excel_files)} excel files in data folder.')
+
           for file_path in excel_files:
               filename = os.path.basename(file_path).replace('-COLAB.xlsx', '').replace('.xlsx', '')
-              df = pd.read_excel(file_path)
+              try:
+                  df = pd.read_excel(file_path)
+              except Exception as e:
+                  print(f'Error reading {file_path}: {e}')
+                  continue
 
-              time_col = [c for c in df.columns if 'date' in c.lower() or 'time' in c.lower() or 'timestamp' in c.lower()]
+              time_col = [c for c in df.columns if 'date' in str(c).lower() or 'time' in str(c).lower() or 'timestamp' in str(c).lower()]
               if not time_col:
+                  print(f'No timestamp column found in {file_path}')
                   continue
               
               df = df.rename(columns={time_col[0]: 'Timestamp'})
-              df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+              df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+              df = df.dropna(subset=['Timestamp'])
 
               if 'Strain (microstrain)' in df.columns:
                   df = df[['Timestamp', 'Strain (microstrain)']].rename(columns={'Strain (microstrain)': f'SG_{filename}'})
+                  processed_dfs.append(df)
               elif 'Z-Axis Max (g)' in df.columns:
                   cols = ['Timestamp', 'Z-Axis Max (g)', 'Z-Axis Min (g)']
-                  df = df[cols].rename(columns={
+                  df = df[[c for c in cols if c in df.columns]].rename(columns={
                       'Z-Axis Max (g)': f'{filename}_Max',
                       'Z-Axis Min (g)': f'{filename}_Min'
                   })
-
-              processed_dfs.append(df)
+                  processed_dfs.append(df)
 
           if processed_dfs:
               final_df = processed_dfs[0]
               for next_df in processed_dfs[1:]:
                   final_df = pd.merge(final_df, next_df, on='Timestamp', how='outer')
 
-              final_df = final_df.sort_values('Timestamp').dropna(how='all', subset=[c for c in final_df.columns if c != 'Timestamp'])
+              final_df = final_df.sort_values('Timestamp')
               
               os.makedirs('docs', exist_ok=True)
               final_df.tail(300).to_json('docs/data.json', orient='records', date_format='iso')
+              print('Successfully wrote docs/data.json')
+          else:
+              print('No valid dataframes to process!')
           "
 
       - name: Commit Processed JSON Data
