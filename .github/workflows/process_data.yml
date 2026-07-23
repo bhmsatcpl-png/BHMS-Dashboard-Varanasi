@@ -3,83 +3,36 @@ name: Process Bridge Sensor Data
 on:
   push:
     paths:
-      - 'data/*.xlsx'
-  workflow_dispatch:
-
-permissions:
-  contents: write
+      - 'data/*.xlsx'        # Triggers when ANY .xlsx file in data/ changes/is added
+      - '**/*.xlsx'         # Or triggers on any Excel file anywhere in the repo
+  workflow_dispatch:        # Allows manual run from GitHub UI
 
 jobs:
-  build:
+  process-sensor-data:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python Runtime
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          python -m pip install pandas openpyxl
+          python -m pip install --upgrade pip
+          pip install pandas openpyxl numpy
 
-      - name: Process & Merge Individual Sensor Files
+      - name: Run Processing Script
         run: |
-          python -c "
-          import os, glob
-          import pandas as pd
+          python process_data.py
 
-          excel_files = glob.glob('data/*.xlsx')
-          processed_dfs = []
-
-          print(f'Found {len(excel_files)} excel files in data folder.')
-
-          for file_path in excel_files:
-              filename = os.path.basename(file_path).replace('-COLAB.xlsx', '').replace('.xlsx', '')
-              try:
-                  df = pd.read_excel(file_path)
-                  time_col = [c for c in df.columns if 'date' in str(c).lower() or 'time' in str(c).lower() or 'timestamp' in str(c).lower()]
-                  if not time_col:
-                      continue
-                  
-                  df = df.rename(columns={time_col[0]: 'Timestamp'})
-                  df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-                  df = df.dropna(subset=['Timestamp'])
-
-                  if 'Strain (microstrain)' in df.columns:
-                      df = df[['Timestamp', 'Strain (microstrain)']].rename(columns={'Strain (microstrain)': f'SG_{filename}'})
-                      processed_dfs.append(df)
-                  elif 'Z-Axis Max (g)' in df.columns:
-                      cols = ['Timestamp', 'Z-Axis Max (g)', 'Z-Axis Min (g)']
-                      df = df[[c for c in cols if c in df.columns]].rename(columns={
-                          'Z-Axis Max (g)': f'{filename}_Max',
-                          'Z-Axis Min (g)': f'{filename}_Min'
-                      })
-                      processed_dfs.append(df)
-              except Exception as e:
-                  print(f'Error reading {file_path}: {e}')
-
-          os.makedirs('docs', exist_ok=True)
-          if processed_dfs:
-              final_df = processed_dfs[0]
-              for next_df in processed_dfs[1:]:
-                  final_df = pd.merge(final_df, next_df, on='Timestamp', how='outer')
-
-              final_df = final_df.sort_values('Timestamp')
-              final_df.tail(300).to_json('docs/data.json', orient='records', date_format='iso')
-              print('Successfully created docs/data.json')
-          else:
-              with open('docs/data.json', 'w') as f:
-                  f.write('[]')
-              print('Created empty docs/data.json')
-          "
-
-      - name: Commit Processed JSON Data
+      - name: Commit and push processed output
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add docs/data.json || true
-          git commit -m "Auto-process multi-sensor Excel data" || exit 0
-          git push
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update processed sensor data [skip ci]" && git push)
