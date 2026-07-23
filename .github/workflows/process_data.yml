@@ -6,6 +6,9 @@ on:
       - 'data/*.xlsx'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -37,48 +40,46 @@ jobs:
               filename = os.path.basename(file_path).replace('-COLAB.xlsx', '').replace('.xlsx', '')
               try:
                   df = pd.read_excel(file_path)
+                  time_col = [c for c in df.columns if 'date' in str(c).lower() or 'time' in str(c).lower() or 'timestamp' in str(c).lower()]
+                  if not time_col:
+                      continue
+                  
+                  df = df.rename(columns={time_col[0]: 'Timestamp'})
+                  df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+                  df = df.dropna(subset=['Timestamp'])
+
+                  if 'Strain (microstrain)' in df.columns:
+                      df = df[['Timestamp', 'Strain (microstrain)']].rename(columns={'Strain (microstrain)': f'SG_{filename}'})
+                      processed_dfs.append(df)
+                  elif 'Z-Axis Max (g)' in df.columns:
+                      cols = ['Timestamp', 'Z-Axis Max (g)', 'Z-Axis Min (g)']
+                      df = df[[c for c in cols if c in df.columns]].rename(columns={
+                          'Z-Axis Max (g)': f'{filename}_Max',
+                          'Z-Axis Min (g)': f'{filename}_Min'
+                      })
+                      processed_dfs.append(df)
               except Exception as e:
                   print(f'Error reading {file_path}: {e}')
-                  continue
 
-              time_col = [c for c in df.columns if 'date' in str(c).lower() or 'time' in str(c).lower() or 'timestamp' in str(c).lower()]
-              if not time_col:
-                  print(f'No timestamp column found in {file_path}')
-                  continue
-              
-              df = df.rename(columns={time_col[0]: 'Timestamp'})
-              df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-              df = df.dropna(subset=['Timestamp'])
-
-              if 'Strain (microstrain)' in df.columns:
-                  df = df[['Timestamp', 'Strain (microstrain)']].rename(columns={'Strain (microstrain)': f'SG_{filename}'})
-                  processed_dfs.append(df)
-              elif 'Z-Axis Max (g)' in df.columns:
-                  cols = ['Timestamp', 'Z-Axis Max (g)', 'Z-Axis Min (g)']
-                  df = df[[c for c in cols if c in df.columns]].rename(columns={
-                      'Z-Axis Max (g)': f'{filename}_Max',
-                      'Z-Axis Min (g)': f'{filename}_Min'
-                  })
-                  processed_dfs.append(df)
-
+          os.makedirs('docs', exist_ok=True)
           if processed_dfs:
               final_df = processed_dfs[0]
               for next_df in processed_dfs[1:]:
                   final_df = pd.merge(final_df, next_df, on='Timestamp', how='outer')
 
               final_df = final_df.sort_values('Timestamp')
-              
-              os.makedirs('docs', exist_ok=True)
               final_df.tail(300).to_json('docs/data.json', orient='records', date_format='iso')
-              print('Successfully wrote docs/data.json')
+              print('Successfully created docs/data.json')
           else:
-              print('No valid dataframes to process!')
+              with open('docs/data.json', 'w') as f:
+                  f.write('[]')
+              print('Created empty docs/data.json')
           "
 
       - name: Commit Processed JSON Data
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add docs/data.json
+          git add docs/data.json || true
           git commit -m "Auto-process multi-sensor Excel data" || exit 0
           git push
