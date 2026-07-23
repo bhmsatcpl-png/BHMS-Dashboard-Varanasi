@@ -21,12 +21,34 @@ jobs:
         run: |
           python -m pip install pandas openpyxl numpy
 
-      - name: Convert Excel to Public JSON
+      - name: Merge All Excel Files & Convert to JSON
         run: |
           python -c "
+          import glob
           import pandas as pd
-          df = pd.read_excel('data/bridge_sensors.xlsx')
-          df.tail(100).to_json('docs/data.json', orient='records', date_format='iso')
+
+          # Find all excel files in data directory
+          excel_files = glob.glob('data/*.xlsx')
+          
+          if excel_files:
+              # Read and concatenate all excel sheets/files
+              df_list = [pd.read_excel(f) for f in excel_files]
+              
+              # If files share timestamps, merge on 'Timestamp'; otherwise stack rows
+              try:
+                  merged_df = df_list[0]
+                  for next_df in df_list[1:]:
+                      merged_df = pd.merge(merged_df, next_df, on='Timestamp', how='outer')
+              except KeyError:
+                  merged_df = pd.concat(df_list, ignore_index=True)
+
+              # Sort chronologically if Timestamp column exists
+              if 'Timestamp' in merged_df.columns:
+                  merged_df['Timestamp'] = pd.to_datetime(merged_df['Timestamp'])
+                  merged_df = merged_df.sort_values('Timestamp')
+
+              # Export latest 150 rows to web data format
+              merged_df.tail(150).to_json('docs/data.json', orient='records', date_format='iso')
           "
 
       - name: Commit Processed JSON Data
@@ -34,5 +56,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add docs/data.json
-          git commit -m "Auto-update live bridge sensor data" || exit 0
+          git commit -m "Auto-merge multi-file sensor data" || exit 0
           git push
