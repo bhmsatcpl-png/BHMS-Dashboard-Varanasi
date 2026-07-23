@@ -17,38 +17,54 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Data Tools
+      - name: Install Dependencies
         run: |
-          python -m pip install pandas openpyxl numpy
+          python -m pip install pandas openpyxl
 
-      - name: Merge All Excel Files & Convert to JSON
+      - name: Process & Merge Individual Sensor Files
         run: |
           python -c "
-          import glob
+          import os, glob
           import pandas as pd
 
-          # Find all excel files in data directory
           excel_files = glob.glob('data/*.xlsx')
-          
-          if excel_files:
-              # Read and concatenate all excel sheets/files
-              df_list = [pd.read_excel(f) for f in excel_files]
+          processed_dfs = []
+
+          for file_path in excel_files:
+              filename = os.path.basename(file_path).replace('-COLAB.xlsx', '').replace('.xlsx', '')
+              df = pd.read_excel(file_path)
+
+              # Standardize timestamp column
+              time_col = [c for c in df.columns if 'date' in c.lower() or 'time' in c.lower() or 'timestamp' in c.lower()]
+              if not time_col:
+                  continue
               
-              # If files share timestamps, merge on 'Timestamp'; otherwise stack rows
-              try:
-                  merged_df = df_list[0]
-                  for next_df in df_list[1:]:
-                      merged_df = pd.merge(merged_df, next_df, on='Timestamp', how='outer')
-              except KeyError:
-                  merged_df = pd.concat(df_list, ignore_index=True)
+              df = df.rename(columns={time_col[0]: 'Timestamp'})
+              df['Timestamp'] = pd.to_datetime(df['Timestamp'])
 
-              # Sort chronologically if Timestamp column exists
-              if 'Timestamp' in merged_df.columns:
-                  merged_df['Timestamp'] = pd.to_datetime(merged_df['Timestamp'])
-                  merged_df = merged_df.sort_values('Timestamp')
+              # Rename value columns using file name as sensor ID
+              if 'Strain (microstrain)' in df.columns:
+                  df = df[['Timestamp', 'Strain (microstrain)']].rename(columns={'Strain (microstrain)': f'SG_{filename}'})
+              elif 'Z-Axis Max (g)' in df.columns:
+                  cols = ['Timestamp', 'Z-Axis Max (g)', 'Z-Axis Min (g)']
+                  df = df[cols].rename(columns={
+                      'Z-Axis Max (g)': f'{filename}_Max',
+                      'Z-Axis Min (g)': f'{filename}_Min'
+                  })
 
-              # Export latest 150 rows to web data format
-              merged_df.tail(150).to_json('docs/data.json', orient='records', date_format='iso')
+              processed_dfs.append(df)
+
+          if processed_dfs:
+              # Merge all sensor dataframes on Timestamp
+              final_df = processed_dfs[0]
+              for next_df in processed_dfs[1:]:
+                  final_df = pd.merge(final_df, next_df, on='Timestamp', how='outer')
+
+              final_df = final_df.sort_values('Timestamp').dropna(how='all', subset=[c for c in final_df.columns if c != 'Timestamp'])
+              
+              # Save latest 300 timestamps to JSON for dashboard
+              os.makedirs('docs', exist_ok=True)
+              final_df.tail(300).to_json('docs/data.json', orient='records', date_format='iso')
           "
 
       - name: Commit Processed JSON Data
@@ -56,5 +72,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add docs/data.json
-          git commit -m "Auto-merge multi-file sensor data" || exit 0
+          git commit -m "Auto-process multi-sensor Excel data" || exit 0
           git push
