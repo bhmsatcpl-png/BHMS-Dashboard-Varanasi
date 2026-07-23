@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bridge SHM Live Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 20px; background-color: #f8f9fa;">
+  <h2>🌉 Bridge Health Monitoring Dashboard</h2>
+  <div id="strain_chart" style="width:100%;height:450px;margin-bottom:30px;"></div>
+  <div id="acc_chart" style="width:100%;height:450px;"></div>
+
+  <script>
+    fetch('data.json')
+      .then(response => response.json())
+      .then(data => {
+        const timestamps = data.map(row => row.Timestamp);
+        const keys = Object.keys(data[0]).filter(k => k !== 'Timestamp');
+
+        // Dynamically identify Strain Gauges vs Accelerometers
+        const sgKeys = keys.filter(k => k.startsWith('SG_'));
+        const accKeys = keys.filter(k => !k.startsWith('SG_'));
+
+        // 1. Plot Strain Gauges
+        let strainTraces = sgKeys.map(key => ({
+          x: timestamps,
+          y: data.map(row => row[key]),
+          name: key,
+          mode: 'lines'
+        }));
+
+        Plotly.newPlot('strain_chart', strainTraces, {
+          title: 'Strain Gauge Monitoring (µε)',
+          xaxis: { title: 'Timestamp' },
+          yaxis: { title: 'Microstrain (µε)' }
+        });
+
+        // 2. Plot Accelerometers (Z-Max / Z-Min)
+        let accTraces = accKeys.map(key => ({
+          x: timestamps,
+          y: data.map(row => row[key]),
+          name: key,
+          mode: 'lines'
+        }));
+
+        Plotly.newPlot('acc_chart', accTraces, {
+          title: 'Accelerometer Acceleration Range (g)',
+          xaxis: { title: 'Timestamp' },
+          yaxis: { title: 'Acceleration (g)' }
+        });
+      });
+  </script>
+</body>
+</html>
